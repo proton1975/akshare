@@ -8,15 +8,72 @@ from datetime import datetime
 from datetime import timedelta
 from sqlalchemy import create_engine
 
-file = open("db.txt", "r")
-db_con = file.read()
+db_con = open("db.txt", "r").read()
+
 engine_ts = create_engine(db_con)
+stock_info_a_code_name_df = pd.DataFrame()
 stock_info_sh_df = pd.DataFrame()
 stock_info_sz_df = pd.DataFrame()
 stock_info_bj_name_code_df = pd.DataFrame()
+stock_zh_a_hist_df = pd.DataFrame()
 
+# 读取日线数据的最后日期
+def get_last_date():
+    sql = """SELECT trade_date FROM last_date where ts_code='all' """
+    return pd.read_sql_query(sql, engine_ts)
+
+# 修改日线数据的最后日期
+def set_last_date():
+    sql = """SELECT datetime FROM `stock_zh_a_hist` order by datetime desc limit 1 """
+    last_day = pd.read_sql_query(sql, engine_ts)['datetime'][0]
+    sql = """ update last_date set trade_date ='{}' where ts_code='all';""".format(last_day)
+    with engine_ts.connect() as con:
+        con.execute(sql)
+    print("Daily 日期更新为{}".format(last_day))
+    
+
+def get_all_stock_zh_a_hist(start_date):
+    for i in range(len(stock_info_a_code_name_df)):
+        get_stock_zh_a_hist([stock_info_a_code_name_df['code'][i], start_date])
+    set_last_date()
+    
+
+def get_stock_zh_a_hist(para:list):
+    # 增加主键
+    # sql="alter table akshare_stock.stock_zh_a_hist add column id int auto_increment primary key;"
+    start_date = para[1]
+    code = para[0]
+    global stock_zh_a_hist_df
+    # code = "002286"
+    stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, adjust="qfq")
+    stock_zh_a_hist_df.loc[:, '代码'] = code
+    stock_zh_a_hist_df.loc[:, '复权'] = "qfq"
+    tmp = ak.stock_zh_a_hist(symbol="002286", period="daily", start_date=start_date, adjust="hfq")
+    tmp.loc[:, '代码'] =code
+    tmp.loc[:, '复权'] = "hfq"
+    stock_zh_a_hist_df = stock_zh_a_hist_df.append(tmp)
+    stock_zh_a_hist_df.columns = \
+        ['datetime', 'open', 'close', 'high', 'low', 'volume', 'turnover', '振幅', '涨跌幅' , '涨跌额', 'turnover rate','代码', '复权']
+    stock_zh_a_hist_df.to_sql("stock_zh_a_hist", engine_ts, index=False, if_exists='append', chunksize=5000)
+    print("股票代码：{} 的历史日数据已更新,数据量{}！".format(code,len(stock_zh_a_hist_df)))
+
+
+
+#从数据库中读取基础数据
+def get_basic_inf_by_sql():
+    global stock_info_a_code_name_df, stock_info_sh_df, stock_info_sz_df, stock_info_bj_name_code_df
+    sql = """ select * from stock_info_a_code_name;"""
+    stock_info_a_code_name_df = pd.read_sql_query(sql, engine_ts)
+    sql = """ select * from stock_info_sh_name_code;"""
+    stock_info_sh_df = pd.read_sql_query(sql, engine_ts)
+    sql = """ select * from stock_info_sz_name_code;"""
+    stock_info_sz_df = pd.read_sql_query(sql, engine_ts)
+    sql = """ select * from stock_info_bj_name_code;"""
+    stock_info_bj_name_code_df = pd.read_sql_query(sql, engine_ts)
+
+# 从网络读取基础数据
 def get_basic_inf():
-    global stock_info_sh_df, stock_info_sz_df, stock_info_bj_name_code_df
+    global stock_info_a_code_name_df, stock_info_sh_df, stock_info_sz_df, stock_info_bj_name_code_df
     # 先清表
     with engine_ts.connect() as con:
         con.execute("""truncate table {} ;""".format("stock_info_a_code_name"))
@@ -31,10 +88,10 @@ def get_basic_inf():
     stock_info_sh_df.loc[:, '类型'] = "主板A股"
     tmp = ak.stock_info_sh_name_code(indicator="主板B股")
     tmp.loc[:, '类型'] = "主板B股"
-    stock_info_sh_df.append(tmp)
+    stock_info_sh_df = stock_info_sh_df.append(tmp)
     tmp = ak.stock_info_sh_name_code(indicator="科创板")
     tmp.loc[:, '类型'] = "科创板"
-    stock_info_sh_df.append(tmp)
+    stock_info_sh_df = stock_info_sh_df.append(tmp)
     stock_info_sh_df.to_sql("stock_info_sh_name_code", engine_ts, index=False, if_exists='append', chunksize=5000)
     #获取深证股票基本信息
     stock_info_sz_df = ak.stock_info_sz_name_code(indicator="A股列表")
@@ -118,12 +175,30 @@ def list_func():
 
 
 if __name__ == "__main__":
-    # choose = input("是否更新基础信息 Y/N?").upper()
-    db_con = pd.read_csv('db.txt')
+    choose = input("是否更新基础信息 Y/N?").upper()
 
-    choose = 'Y'
+
+    # choose = 'N'
     if choose == 'Y':
         get_basic_inf()
+    else:
+        get_basic_inf_by_sql()
+    # 从数据库获得上次更新日期
+    last_date = get_last_date()
+    # 取得'trade_date'列，第0行
+    last_date = datetime.strptime(last_date['trade_date'][0], "%Y-%m-%d").date()
+    # 取得当前日期
+    today = datetime.now().date()
+    # 更新日常数据，条件：
+    # 1.日期差大于1
+    # 2.日期差大于0，当前时间已过16点
+    if (today - last_date).days > 1 or \
+            ((today - last_date).days > 0 and datetime.now().time() >
+             datetime.strptime("160000", "%H%M%S").time()):
+        # 获取更新日期加1天之后的数据
+        get_all_stock_zh_a_hist(last_date + timedelta(days=1))
+        
+        # get_stock_zh_a_hist(['002286',last_date + timedelta(days=1)])
     df = get_df()
     # print(df)
     run_strategy(df)
