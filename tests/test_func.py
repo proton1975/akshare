@@ -17,6 +17,7 @@ def test_cost_living():
     """
     cost_living_df = cost_living()
     assert cost_living_df.shape[0] > 0
+    print(cost_living_df)
 
 
 def test_path_func():
@@ -27,7 +28,8 @@ def test_path_func():
     """
     temp_path = get_ths_js("ths.js")
     assert isinstance(temp_path, pathlib.Path)
-
+    print(temp_path)
+    print(pathlib.Path)
 
 def test_zipfile_func():
     """
@@ -37,6 +39,7 @@ def test_zipfile_func():
     """
     temp_path = get_crypto_info_csv("crypto_info.zip")
     assert isinstance(temp_path, pathlib.Path)
+    print(pathlib.Path)
 
 
 if __name__ == "__main__":
