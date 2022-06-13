@@ -7,9 +7,16 @@ import pandas_ta as ta
 from datetime import datetime
 from datetime import timedelta
 from sqlalchemy import create_engine
-engine_ts = create_engine('mysql://root:Azsxdcfv0@127.0.0.1:3306/akshare_stock?charset=utf8&use_unicode=1')
+
+file = open("db.txt", "r")
+db_con = file.read()
+engine_ts = create_engine(db_con)
+stock_info_sh_df = pd.DataFrame()
+stock_info_sz_df = pd.DataFrame()
+stock_info_bj_name_code_df = pd.DataFrame()
 
 def get_basic_inf():
+    global stock_info_sh_df, stock_info_sz_df, stock_info_bj_name_code_df
     # 先清表
     with engine_ts.connect() as con:
         con.execute("""truncate table {} ;""".format("stock_info_a_code_name"))
@@ -112,6 +119,8 @@ def list_func():
 
 if __name__ == "__main__":
     # choose = input("是否更新基础信息 Y/N?").upper()
+    db_con = pd.read_csv('db.txt')
+
     choose = 'Y'
     if choose == 'Y':
         get_basic_inf()
